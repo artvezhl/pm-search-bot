@@ -57,24 +57,10 @@ jobs:
           script: |
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
-            if [ -d ".git" ]; then
-              REPO_DIR="$PWD"
-            elif [ -d "../.git" ]; then
-              cd ..
-              REPO_DIR="$PWD"
-            else
-              echo "DEPLOY_PATH must point to repository root or polymarket-bot subdirectory"
+            if [ ! -f "docker-compose.server.yml" ]; then
+              echo "docker-compose.server.yml not found in DEPLOY_PATH"
               exit 1
             fi
-            if [ -d "$REPO_DIR/polymarket-bot" ]; then
-              APP_DIR="$REPO_DIR/polymarket-bot"
-            else
-              APP_DIR="$REPO_DIR"
-            fi
-            git fetch --all --prune
-            git checkout "${{ github.ref_name }}"
-            git pull --ff-only origin "${{ github.ref_name }}"
-            cd "$APP_DIR"
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
             APP_IMAGE="${{ needs.build.outputs.image }}" docker compose -f docker-compose.server.yml pull app worker beat
             APP_IMAGE="${{ needs.build.outputs.image }}" docker compose -f docker-compose.server.yml up -d --remove-orphans
