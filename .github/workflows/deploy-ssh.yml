@@ -65,4 +65,14 @@ jobs:
             APP_IMAGE="${{ needs.build.outputs.image }}" docker compose -f docker-compose.server.yml pull app worker beat
             APP_IMAGE="${{ needs.build.outputs.image }}" docker compose -f docker-compose.server.yml up -d --remove-orphans
             APP_IMAGE="${{ needs.build.outputs.image }}" docker compose -f docker-compose.server.yml exec -T app alembic upgrade head
-            curl -fsS "http://127.0.0.1:${API_PORT:-8000}/health"
+            for i in $(seq 1 20); do
+              if curl -fsS "http://127.0.0.1:${API_PORT:-8000}/health" >/dev/null; then
+                echo "Healthcheck passed"
+                exit 0
+              fi
+              echo "Waiting for app health ($i/20)..."
+              sleep 3
+            done
+            echo "Healthcheck failed after retries. Recent app logs:"
+            docker compose -f docker-compose.server.yml logs --tail=200 app
+            exit 1
