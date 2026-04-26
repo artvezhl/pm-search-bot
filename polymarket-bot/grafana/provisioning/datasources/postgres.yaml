@@ -1,0 +1,16 @@
+apiVersion: 1
+datasources:
+  - name: Polybot Postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: polybot
+    secureJsonData:
+      password: polybot
+    jsonData:
+      database: polybot
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: true
+    isDefault: true
+    editable: false

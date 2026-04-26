@@ -1,0 +1,46 @@
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Secrets
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+
+# Build / package artifacts
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# Docker / runtime data
+docker-data/
+
+# Local DB files
+*.db
+*.db-shm
+*.db-wal
+
+# Project-specific generated artifacts
+polymarket-bot/.env
+polymarket-bot/.venv/
+polymarket-bot/venv/
+polymarket-bot/__pycache__/

@@ -1,0 +1,113 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "Polybot Postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT NOW() AS time, COALESCE(SUM(pnl_usd), 0)::float AS pnl FROM bot_positions WHERE status = 'closed'",
+          "refId": "A"
+        }
+      ],
+      "title": "Realised PnL (all-time)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "Polybot Postgres" },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT NOW() AS time, COUNT(*) AS open FROM bot_positions WHERE status = 'open'",
+          "refId": "A"
+        }
+      ],
+      "title": "Open positions",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "Polybot Postgres" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT NOW() AS time, (CASE WHEN COUNT(*) = 0 THEN 0 ELSE SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END)::float / COUNT(*) END) AS winrate FROM bot_positions WHERE status = 'closed'",
+          "refId": "A"
+        }
+      ],
+      "title": "Winrate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "Polybot Postgres" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "id": 4,
+      "title": "Daily realised PnL (30d)",
+      "type": "timeseries",
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('day', closed_at) AS time, SUM(pnl_usd)::float AS pnl_usd FROM bot_positions WHERE status='closed' AND closed_at > NOW() - INTERVAL '30 days' GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "Polybot Postgres" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "id": 5,
+      "title": "Trades ingested per hour (24h)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', timestamp) AS time, COUNT(*) AS trades FROM trades WHERE timestamp > NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "Polybot Postgres" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 14 },
+      "id": 6,
+      "title": "Top candidate players",
+      "type": "table",
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT address, winrate::float, trades_count, total_volume_usd::float, activity_score::float FROM player_stats WHERE is_candidate = true ORDER BY activity_score DESC, total_volume_usd DESC LIMIT 25",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["polymarket"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Polymarket Copy-Trading — Overview",
+  "uid": "polybot-overview",
+  "version": 1,
+  "weekStart": ""
+}
