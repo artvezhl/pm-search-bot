@@ -190,6 +190,31 @@
     },
     {
       "datasource": { "type": "postgres", "uid": "Polybot Postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 30 },
+      "id": 12,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT NOW() AS time, EXTRACT(EPOCH FROM COALESCE(MAX(timestamp), TO_TIMESTAMP(0))) * 1000 AS value FROM trades",
+          "refId": "A"
+        }
+      ],
+      "title": "Latest CLOB trade timestamp",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "Polybot Postgres" },
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 36 },
       "id": 11,
       "title": "PM history ingestion runs (last 30)",
@@ -213,6 +238,6 @@
   "timezone": "",
   "title": "Polymarket Copy-Trading — Overview",
   "uid": "polybot-overview",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }
