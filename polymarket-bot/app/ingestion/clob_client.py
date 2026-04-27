@@ -202,7 +202,7 @@ class CLOBClient:
         self,
         market_id: str | None = None,
         maker_address: str | None = None,
-        limit: int = 100,
+        limit: int = 1000,
         next_cursor: str | None = None,
     ) -> list[dict[str, Any]]:
         trades, _ = await self.fetch_trades_page(
@@ -217,7 +217,7 @@ class CLOBClient:
         self,
         market_id: str | None = None,
         maker_address: str | None = None,
-        limit: int = 100,
+        limit: int = 1000,
         next_cursor: str | None = None,
     ) -> tuple[list[dict[str, Any]], str]:
         """Fetch recent trades from public Data API `/trades` with offset pagination."""

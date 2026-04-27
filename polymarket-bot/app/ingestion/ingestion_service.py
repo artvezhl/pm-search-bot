@@ -317,7 +317,7 @@ class IngestionService:
                 for _ in range(max_pages):
                     try:
                         page, next_cursor = await clob.fetch_trades_page(
-                            limit=500,
+                            limit=1000,
                             next_cursor=cursor or None,
                         )
                     except Exception as e:  # noqa: BLE001
@@ -392,7 +392,7 @@ class IngestionService:
         """
         try:
             async with CLOBClient() as clob:
-                trades = await clob.fetch_trades(limit=500)
+                trades = await clob.fetch_trades(limit=1000)
         except Exception as e:  # noqa: BLE001
             logger.warning("Ingestion WS fallback: global trades fetch failed: {}", e)
             return []
