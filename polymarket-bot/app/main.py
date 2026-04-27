@@ -68,7 +68,8 @@ async def _run_fastapi() -> None:
 
 
 async def main() -> None:
-    logger.info("Polymarket bot main starting (mode={})", "PAPER" if get_settings().simulation_mode else "LIVE")
+    settings = get_settings()
+    logger.info("Polymarket bot main starting (mode={})", "PAPER" if settings.simulation_mode else "LIVE")
 
     ingestion = IngestionService()
     polygon = PolygonListener(on_resolution=_on_resolution)
@@ -88,9 +89,14 @@ async def main() -> None:
     tasks: list[asyncio.Task] = [  # type: ignore[type-arg]
         asyncio.create_task(ingestion.run(), name="ingestion"),
         asyncio.create_task(polygon.run(), name="polygon"),
-        asyncio.create_task(run_bot(), name="telegram"),
         asyncio.create_task(_run_fastapi(), name="fastapi"),
     ]
+    # Telegram is optional; if token is missing, do not add a short-lived task
+    # that would terminate the whole process under FIRST_EXCEPTION policy.
+    if settings.telegram_bot_token:
+        tasks.append(asyncio.create_task(run_bot(), name="telegram"))
+    else:
+        logger.info("Telegram task disabled: TELEGRAM_BOT_TOKEN is not set")
 
     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
     for t in pending:
