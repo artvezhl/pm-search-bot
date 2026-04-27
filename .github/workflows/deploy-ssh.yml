@@ -59,15 +59,29 @@ jobs:
           chmod 700 ~/.ssh
           printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -p 22 "${SSH_HOST}" >> ~/.ssh/known_hosts
+          ssh-keyscan -T 10 -p 22 "${SSH_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
+          echo "Checking SSH connectivity to ${SSH_USER}@${SSH_HOST}:22 ..."
           ssh -p 22 \
             -o BatchMode=yes \
             -o ConnectTimeout=15 \
             -o ServerAliveInterval=10 \
             -o ServerAliveCountMax=2 \
+            -o StrictHostKeyChecking=accept-new \
             "${SSH_USER}@${SSH_HOST}" \
-            "set -euo pipefail; cd \"${DEPLOY_PATH}\"; test -f docker-compose.server.yml"
+            "set -euo pipefail; \
+             echo \"SSH connection established\"; \
+             if [ ! -d \"${DEPLOY_PATH}\" ]; then \
+               echo \"DEPLOY_PATH does not exist: ${DEPLOY_PATH}\"; \
+               exit 1; \
+             fi; \
+             cd \"${DEPLOY_PATH}\"; \
+             if [ ! -f docker-compose.server.yml ]; then \
+               echo \"docker-compose.server.yml not found in DEPLOY_PATH: ${DEPLOY_PATH}\"; \
+               ls -la; \
+               exit 1; \
+             fi; \
+             echo \"Preflight checks passed\""
 
       - name: Login to GHCR on remote server
         uses: appleboy/ssh-action@v1.0.3
