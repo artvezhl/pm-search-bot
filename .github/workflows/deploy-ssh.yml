@@ -46,6 +46,9 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     needs: build
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Deploy on self-hosted runner
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
@@ -54,6 +57,11 @@ jobs:
           APP_IMAGE: ${{ needs.build.outputs.image }}
         run: |
           set -euo pipefail
+
+          # Sync deployment files to server path (no git required on target host).
+          mkdir -p "${DEPLOY_PATH}"
+          cp -a ./polymarket-bot/. "${DEPLOY_PATH}/"
+
           cd "${DEPLOY_PATH}"
           if [ ! -f "docker-compose.server.yml" ]; then
             echo "docker-compose.server.yml not found in DEPLOY_PATH: ${DEPLOY_PATH}"

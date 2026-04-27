@@ -187,6 +187,20 @@
       ],
       "title": "Latest PM trade block time",
       "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "Polybot Postgres" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 36 },
+      "id": 11,
+      "title": "PM history ingestion runs (last 30)",
+      "type": "table",
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT started_at, finished_at, status, inserted_rows, date_from, date_to, COALESCE(error_message, '') AS error_message FROM ingestion_runs WHERE task_name = 'app.tasks.ingestion_tasks.pm_history_load_daily_range' ORDER BY started_at DESC LIMIT 30",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -199,6 +213,6 @@
   "timezone": "",
   "title": "Polymarket Copy-Trading — Overview",
   "uid": "polybot-overview",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 
 from redis.asyncio import Redis
 
 from app.config import get_settings
+from app.db import AsyncSessionLocal
+from app.db.models import IngestionRun
 from app.execution.trade_executor import TradeExecutor
 from app.ingestion.dune_history_loader import DuneHistoryLoader
 from app.ingestion.history_loader import HistoryLoader
@@ -97,7 +100,36 @@ def pm_history_load_daily_range(
     date_from: str = "",
     date_to: str = "",
 ) -> int:
-    return asyncio.run(HistoryLoader().run_daily_range(query_id, date_from=date_from, date_to=date_to))
+    async def _tracked_run() -> int:
+        async with AsyncSessionLocal() as session:
+            run = IngestionRun(
+                task_name="app.tasks.ingestion_tasks.pm_history_load_daily_range",
+                status="running",
+                date_from=datetime.fromisoformat(date_from) if date_from else None,
+                date_to=datetime.fromisoformat(date_to) if date_to else None,
+                inserted_rows=0,
+            )
+            session.add(run)
+            await session.commit()
+            await session.refresh(run)
+
+            try:
+                inserted = await HistoryLoader().run_daily_range(
+                    query_id, date_from=date_from, date_to=date_to
+                )
+                run.status = "success"
+                run.inserted_rows = inserted
+                run.finished_at = datetime.now(timezone.utc)
+                await session.commit()
+                return inserted
+            except Exception as e:  # noqa: BLE001
+                run.status = "failed"
+                run.error_message = str(e)[:2000]
+                run.finished_at = datetime.now(timezone.utc)
+                await session.commit()
+                raise
+
+    return asyncio.run(_tracked_run())
 
 
 @celery_app.task(name="app.tasks.ingestion_tasks.backfill_onchain_trades")

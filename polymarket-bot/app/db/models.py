@@ -331,6 +331,26 @@ class PMCopySignal(Base):
     )
 
 
+class IngestionRun(Base):
+    __tablename__ = "ingestion_runs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    date_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    date_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    inserted_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_ingestion_runs_task_started", "task_name", "started_at"),
+    )
+
+
 __all__ = [
     "Base",
     "Trade",
@@ -345,4 +365,5 @@ __all__ = [
     "PMWallet",
     "PMWalletNetwork",
     "PMCopySignal",
+    "IngestionRun",
 ]
