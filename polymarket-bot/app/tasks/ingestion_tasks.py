@@ -9,6 +9,7 @@ from redis.asyncio import Redis
 
 from app.config import get_settings
 from app.execution.trade_executor import TradeExecutor
+from app.ingestion.dune_history_loader import DuneHistoryLoader
 from app.ingestion.history_loader import HistoryLoader
 from app.ingestion.ingestion_service import IngestionService
 from app.ingestion.market_sync import MarketSync
@@ -73,6 +74,21 @@ def pm_history_load(
     date_to: str | None = None,
 ) -> int:
     return asyncio.run(HistoryLoader().run(query_id, date_from=date_from, date_to=date_to))
+
+
+@celery_app.task(name="app.tasks.ingestion_tasks.pm_history_load_dune")
+def pm_history_load_dune(
+    query_id: int,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> int:
+    return asyncio.run(
+        DuneHistoryLoader().run(
+            query_id=query_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    )
 
 
 @celery_app.task(name="app.tasks.ingestion_tasks.pm_history_load_daily_range")

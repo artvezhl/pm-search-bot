@@ -38,7 +38,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    worker_concurrency=4,
+    # Keep conservative defaults for small servers (2 CPU / 4 GB).
+    worker_concurrency=2,
     task_default_queue="default",
     task_routes={
         "app.tasks.ingestion_tasks.*": {"queue": "ingestion"},

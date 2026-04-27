@@ -55,6 +55,9 @@ services:
         "--loglevel=info",
         "-Q",
         "default,ingestion,analysis,exit",
+        "--concurrency=2",
+        "--prefetch-multiplier=1",
+        "--max-tasks-per-child=200",
       ]
     restart: unless-stopped
 
