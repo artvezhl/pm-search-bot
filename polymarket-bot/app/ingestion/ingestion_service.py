@@ -312,24 +312,23 @@ class IngestionService:
 
     async def _run_ws_loop(self) -> None:
         """Live stream of trades. Market/trade REST backfill is Celery's job."""
-        # Bootstrap once in case the DB is empty on first boot.
-        async with AsyncSessionLocal() as session:
-            asset_ids = await list_tracked_asset_ids(session)
-        if not asset_ids:
-            logger.info(
-                "Ingestion: markets table empty, triggering an initial REST refresh"
-            )
-            try:
-                await self.refresh_markets_and_trades()
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Ingestion bootstrap REST failed: {}", e)
-
         async with AsyncSessionLocal() as session:
             asset_ids = (await list_tracked_asset_ids(session))[:500]
+        if not asset_ids:
+            asset_ids = await self._fallback_asset_ids_from_recent_trades()
 
         while not self._stop.is_set():
             if not asset_ids:
-                logger.info("Ingestion WS: no assets yet, waiting for Celery to populate markets")
+                logger.info(
+                    "Ingestion WS: no tracked assets in markets, trying recent global trades fallback"
+                )
+                asset_ids = await self._fallback_asset_ids_from_recent_trades()
+                if asset_ids:
+                    logger.info(
+                        "Ingestion WS: fallback produced {} assets, retrying websocket",
+                        len(asset_ids),
+                    )
+                    continue
                 try:
                     await asyncio.wait_for(self._stop.wait(), timeout=60.0)
                 except asyncio.TimeoutError:
@@ -350,6 +349,40 @@ class IngestionService:
                 pass
             async with AsyncSessionLocal() as session:
                 asset_ids = (await list_tracked_asset_ids(session))[:500]
+            if not asset_ids:
+                asset_ids = await self._fallback_asset_ids_from_recent_trades()
+
+    async def _fallback_asset_ids_from_recent_trades(self) -> list[str]:
+        """Use global trades feed to get currently active asset IDs.
+
+        This keeps WS ingestion alive even when market flags in DB are stale.
+        """
+        try:
+            async with CLOBClient() as clob:
+                trades = await clob.fetch_trades(limit=500)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Ingestion WS fallback: global trades fetch failed: {}", e)
+            return []
+
+        asset_ids: list[str] = []
+        seen: set[str] = set()
+        for t in trades:
+            aid = t.get("asset_id") or t.get("token_id") or t.get("tokenId")
+            if not aid:
+                continue
+            sid = str(aid)
+            if sid in seen:
+                continue
+            seen.add(sid)
+            asset_ids.append(sid)
+            if len(asset_ids) >= 500:
+                break
+        logger.info(
+            "Ingestion WS fallback: collected {} assets from {} global trades",
+            len(asset_ids),
+            len(trades),
+        )
+        return asset_ids
 
     async def run(self) -> None:
         logger.info("Ingestion: starting WS loop")
