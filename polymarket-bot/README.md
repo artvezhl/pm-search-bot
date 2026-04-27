@@ -6,16 +6,16 @@ Python-бот, который следит за кошельками на [Polym
 
 ## Стек
 
-| Компонент | Технология                            |
-| --------- | ------------------------------------- |
-| Runtime   | Python 3.11                           |
-| Очередь   | Celery + Redis                        |
-| БД        | PostgreSQL 16 + TimescaleDB           |
-| API       | FastAPI + Uvicorn                     |
-| Dashboard | Grafana (provisioning)                |
-| Бот       | python-telegram-bot (async, v21)      |
-| Анализ    | scikit-learn DBSCAN, pandas, numpy    |
-| Execution | py-clob-client (live) или paper в БД  |
+| Компонент | Технология                           |
+| --------- | ------------------------------------ |
+| Runtime   | Python 3.11                          |
+| Очередь   | Celery + Redis                       |
+| БД        | PostgreSQL 16 + TimescaleDB          |
+| API       | FastAPI + Uvicorn                    |
+| Dashboard | Grafana (provisioning)               |
+| Бот       | python-telegram-bot (async, v21)     |
+| Анализ    | scikit-learn DBSCAN, pandas, numpy   |
+| Execution | py-clob-client (live) или paper в БД |
 
 ## Быстрый старт
 
@@ -30,7 +30,9 @@ docker compose up --build
 
 - `app` — Telegram + ingestion (CLOB REST/WS) + Polygon listener + FastAPI на `:8000`
 - `worker` — Celery worker для фоновых задач
+- `worker_backfill` — отдельный Celery worker для тяжелых исторических задач (`backfill` queue)
 - `beat` — Celery beat (расписание)
+- `beat_standby` — резервный Celery beat (профиль `standby`, включать только при failover)
 - `postgres` — TimescaleDB на `:5432`
 - `redis` — `:6379`
 - `grafana` — `:3000` (admin/admin)
@@ -42,15 +44,15 @@ docker compose up --build
 1. `docker compose up --build`
 2. В Telegram пишем боту `/status` — должно ответить `Mode: PAPER, Balance: $10,000.00`
 3. Через 1–2 минуты: `docker compose exec postgres psql -U polybot -d polybot -c "SELECT COUNT(*) FROM trades;"` — строки появились
-4. Grafana: http://localhost:3000 → Dashboards → **Polymarket** → *Overview*
+4. Grafana: http://localhost:3000 → Dashboards → **Polymarket** → _Overview_
 5. FastAPI health: http://localhost:8000/health → `{"status":"ok"}`
 
 ## Режимы
 
-| Режим  | `.env`                           | Исполнение                                        |
-| ------ | -------------------------------- | ------------------------------------------------- |
-| PAPER  | `SIMULATION_MODE=true` (default) | сделки пишутся в таблицу `bot_positions`, ордера не уходят |
-| LIVE   | `SIMULATION_MODE=false`          | ордера отправляются через `py-clob-client`, нужны `POLYMARKET_PK`, `POLY_API_*`, `POLYMARKET_PROXY_ADDRESS` |
+| Режим | `.env`                           | Исполнение                                                                                                  |
+| ----- | -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| PAPER | `SIMULATION_MODE=true` (default) | сделки пишутся в таблицу `bot_positions`, ордера не уходят                                                  |
+| LIVE  | `SIMULATION_MODE=false`          | ордера отправляются через `py-clob-client`, нужны `POLYMARKET_PK`, `POLY_API_*`, `POLYMARKET_PROXY_ADDRESS` |
 
 Перед переключением в live:
 
@@ -63,14 +65,14 @@ docker compose up --build
 
 Установи `TELEGRAM_ALLOWED_IDS` списком разрешённых Telegram user ID (пусто — без ACL).
 
-| Команда     | Описание                                                     |
-| ----------- | ------------------------------------------------------------ |
-| `/start`    | Справка                                                      |
-| `/help`     | Справка                                                      |
-| `/status`   | Режим, баланс, число открытых позиций                        |
-| `/positions`| До 20 открытых позиций с live P&L (по CLOB `/price`)          |
-| `/clusters` | Топ-10 кластеров за последние 24 часа по score                |
-| `/stats`    | Закрытые сделки, winrate, Sharpe, 24h/7d PnL, баланс          |
+| Команда      | Описание                                             |
+| ------------ | ---------------------------------------------------- |
+| `/start`     | Справка                                              |
+| `/help`      | Справка                                              |
+| `/status`    | Режим, баланс, число открытых позиций                |
+| `/positions` | До 20 открытых позиций с live P&L (по CLOB `/price`) |
+| `/clusters`  | Топ-10 кластеров за последние 24 часа по score       |
+| `/stats`     | Закрытые сделки, winrate, Sharpe, 24h/7d PnL, баланс |
 
 Уведомления приходят в `TRADER_NOTIFY_CHAT_ID`:
 
@@ -90,23 +92,23 @@ docker compose up --build
 
 См. `.env.example`. Наиболее важные:
 
-| Переменная                 | Что                                              |
-| -------------------------- | ------------------------------------------------ |
-| `SIMULATION_MODE`          | paper (true) / live (false)                      |
-| `STARTING_BALANCE`         | база для расчёта риск-лимитов                    |
-| `MIN_WINRATE`              | мин. winrate кандидата (PlayerTracker)           |
-| `MIN_TOTAL_VOLUME_USD`     | мин. объём кандидата                             |
-| `DBSCAN_EPS`               | радиус кластеризации                             |
-| `MIN_CLUSTER_SIZE`         | мин. уникальных игроков в кластере               |
-| `MIN_CLUSTER_SCORE`        | порог score кластера                             |
-| `MAX_POSITION_PCT`         | макс. % депо на позицию                          |
-| `MAX_OPEN_POSITIONS`       | макс. открытых позиций одновременно              |
-| `MAX_DAILY_LOSS_PCT`       | daily kill-switch                                |
-| `POSITION_STOP_LOSS_PCT`   | стоп по позиции                                  |
-| `MAX_HOLD_DAYS`            | таймаут позиции                                  |
-| `ONCHAIN_BACKFILL_ENABLED` | включить backfill трейдоподобных on-chain событий |
-| `ONCHAIN_BACKFILL_DAYS`    | глубина backfill по блокчейну (по умолчанию 30)  |
-| `ONCHAIN_BACKFILL_CHUNK_SIZE` | размер чанка блоков для `eth_getLogs`         |
+| Переменная                    | Что                                               |
+| ----------------------------- | ------------------------------------------------- |
+| `SIMULATION_MODE`             | paper (true) / live (false)                       |
+| `STARTING_BALANCE`            | база для расчёта риск-лимитов                     |
+| `MIN_WINRATE`                 | мин. winrate кандидата (PlayerTracker)            |
+| `MIN_TOTAL_VOLUME_USD`        | мин. объём кандидата                              |
+| `DBSCAN_EPS`                  | радиус кластеризации                              |
+| `MIN_CLUSTER_SIZE`            | мин. уникальных игроков в кластере                |
+| `MIN_CLUSTER_SCORE`           | порог score кластера                              |
+| `MAX_POSITION_PCT`            | макс. % депо на позицию                           |
+| `MAX_OPEN_POSITIONS`          | макс. открытых позиций одновременно               |
+| `MAX_DAILY_LOSS_PCT`          | daily kill-switch                                 |
+| `POSITION_STOP_LOSS_PCT`      | стоп по позиции                                   |
+| `MAX_HOLD_DAYS`               | таймаут позиции                                   |
+| `ONCHAIN_BACKFILL_ENABLED`    | включить backfill трейдоподобных on-chain событий |
+| `ONCHAIN_BACKFILL_DAYS`       | глубина backfill по блокчейну (по умолчанию 30)   |
+| `ONCHAIN_BACKFILL_CHUNK_SIZE` | размер чанка блоков для `eth_getLogs`             |
 
 ## FastAPI эндпоинты
 
@@ -118,6 +120,42 @@ docker compose up --build
 - `GET /api/stats` — агрегаты
 - `GET /api/players/top?limit=50` — кандидаты-лидеры
 - `GET /api/trades/latest?limit=100` — последние трейды из ingestion
+
+## Backfill без блокировки ingestion
+
+`pm_history_load_daily_range` маршрутизируется в отдельную очередь `backfill`, чтобы не блокировать
+оперативные задачи ingestion (`pm_trade_poller`, `refresh_markets_and_trades`).
+
+Запуск/проверка:
+
+```bash
+docker compose up -d worker worker_backfill beat
+docker compose exec worker celery -A app.tasks.celery_app inspect active_queues
+docker compose exec worker_backfill celery -A app.tasks.celery_app inspect active_queues
+```
+
+Для планировщика используется один активный `beat`. Резервный экземпляр:
+
+```bash
+# Запуск standby-планировщика (только при недоступности основного beat)
+docker compose --profile standby up -d beat_standby
+```
+
+Не запускай `beat` и `beat_standby` одновременно, иначе periodic-задачи будут дублироваться.
+
+Ручной запуск history-load (в очередь `backfill`):
+
+```bash
+docker compose -f docker-compose.server.yml exec -T worker python - <<'PY'
+from app.tasks.celery_app import celery_app
+r = celery_app.send_task(
+    "app.tasks.ingestion_tasks.pm_history_load_daily_range",
+    args=[None, "2025-10-27 00:00:00", "2026-04-26 00:00:00"],
+    queue="backfill",
+)
+print(r.id)
+PY
+```
 
 ## Тесты
 

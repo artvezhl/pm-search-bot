@@ -3,6 +3,8 @@
 Run modes:
     # worker
     celery -A app.tasks.celery_app worker --loglevel=info -Q default,ingestion,analysis,exit
+    # dedicated backfill worker
+    celery -A app.tasks.celery_app worker --loglevel=info -Q backfill --concurrency=1
     # beat
     celery -A app.tasks.celery_app beat --loglevel=info
 
@@ -42,6 +44,8 @@ celery_app.conf.update(
     worker_concurrency=2,
     task_default_queue="default",
     task_routes={
+        # Long historical loads must not starve realtime ingestion queue.
+        "app.tasks.ingestion_tasks.pm_history_load_daily_range": {"queue": "backfill"},
         "app.tasks.ingestion_tasks.*": {"queue": "ingestion"},
         "app.tasks.analysis_tasks.*": {"queue": "analysis"},
         "app.tasks.exit_tasks.*": {"queue": "exit"},

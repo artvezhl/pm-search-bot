@@ -18,6 +18,27 @@ curl -fsS http://127.0.0.1:8000/health
 docker compose -f docker-compose.server.yml logs --tail=100 app worker beat
 ```
 
+Проверить отдельный worker для backfill:
+
+```bash
+docker compose -f docker-compose.server.yml ps worker worker_backfill beat
+docker compose -f docker-compose.server.yml exec -T worker celery -A app.tasks.celery_app inspect active_queues
+docker compose -f docker-compose.server.yml exec -T worker_backfill celery -A app.tasks.celery_app inspect active_queues
+```
+
+Планировщик: основной + резервный (failover):
+
+```bash
+# Обычно запущен только beat
+docker compose -f docker-compose.server.yml ps beat beat_standby
+
+# Поднять standby-планировщик только при аварии основного
+docker compose -f docker-compose.server.yml --profile standby up -d beat_standby
+docker compose -f docker-compose.server.yml logs --tail=100 beat beat_standby
+```
+
+Важно: не держать `beat` и `beat_standby` одновременно активными, иначе периодические задачи будут запускаться дублями.
+
 ## 2) База данных: быстрые проверки
 
 ```bash
@@ -119,8 +140,16 @@ echo "delta=$((after-before))"
 # рынки
 docker compose -f docker-compose.server.yml exec -T worker celery -A app.tasks.celery_app call app.tasks.ingestion_tasks.pm_market_sync
 
-# история on-chain (день за днем, newest -> oldest)
-docker compose -f docker-compose.server.yml exec -T worker celery -A app.tasks.celery_app call app.tasks.ingestion_tasks.pm_history_load_daily_range --args='[null, "2025-10-27 00:00:00", "2026-04-26 00:00:00"]'
+# история on-chain (день за днем, newest -> oldest) в очередь backfill
+docker compose -f docker-compose.server.yml exec -T worker python - <<'PY'
+from app.tasks.celery_app import celery_app
+r = celery_app.send_task(
+    "app.tasks.ingestion_tasks.pm_history_load_daily_range",
+    args=[None, "2025-10-27 00:00:00", "2026-04-26 00:00:00"],
+    queue="backfill",
+)
+print(r.id)
+PY
 
 # история из Dune по Query ID
 docker compose -f docker-compose.server.yml exec -T worker celery -A app.tasks.celery_app call app.tasks.ingestion_tasks.pm_history_load_dune --args='[7372649]'
@@ -183,7 +212,7 @@ Telegram команды:
 Применить тюнинг после деплоя:
 
 ```bash
-docker compose -f docker-compose.server.yml up -d --force-recreate worker beat
+docker compose -f docker-compose.server.yml up -d --force-recreate worker worker_backfill beat
 docker compose -f docker-compose.server.yml ps
 ```
 
@@ -191,5 +220,46 @@ docker compose -f docker-compose.server.yml ps
 
 ```bash
 docker stats --no-stream
-docker compose -f docker-compose.server.yml logs --tail=120 worker
+docker compose -f docker-compose.server.yml logs --tail=120 worker worker_backfill
 ```
+
+## 10) Celery: как проверить задачу по `task_id`
+
+Запустить задачу асинхронно и получить `task_id`:
+
+```bash
+docker compose -f docker-compose.server.yml exec -T worker \
+  python - <<'PY'
+from app.tasks.celery_app import celery_app
+r = celery_app.send_task(
+    "app.tasks.ingestion_tasks.pm_history_load_daily_range",
+    args=[None, "2025-10-27 00:00:00", "2026-04-26 00:00:00"],
+    queue="backfill",
+)
+print(r.id)
+PY
+```
+
+Проверить статус и результат:
+
+```bash
+# Подробно через AsyncResult
+docker compose -f docker-compose.server.yml exec -T worker \
+  python - <<'PY'
+from app.tasks.celery_app import celery_app
+task_id = '<TASK_ID>'  # замени на реальный id
+r = celery_app.AsyncResult(task_id)
+print('id=', r.id)
+print('state=', r.state)
+print('ready=', r.ready())
+print('successful=', r.successful() if r.ready() else None)
+print('result=', r.result)
+print('traceback=', r.traceback)
+PY
+```
+
+Расшифровка состояний:
+- `PENDING` — задача ещё не взята в работу (или id не найден).
+- `STARTED`/`RETRY` — выполняется или ретраится.
+- `SUCCESS` — завершилась успешно (`result` содержит return-value задачи).
+- `FAILURE` — завершилась с ошибкой (смотри `traceback`).

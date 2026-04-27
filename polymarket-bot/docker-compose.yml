@@ -49,6 +49,17 @@ services:
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "-Q", "default,ingestion,analysis,exit", "--concurrency=2", "--prefetch-multiplier=1", "--max-tasks-per-child=200"]
     restart: unless-stopped
 
+  worker_backfill:
+    build: .
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "-Q", "backfill", "--concurrency=1", "--prefetch-multiplier=1", "--max-tasks-per-child=50"]
+    restart: unless-stopped
+
   beat:
     build: .
     env_file: .env
@@ -58,6 +69,19 @@ services:
       redis:
         condition: service_healthy
     command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]
+    restart: unless-stopped
+
+  beat_standby:
+    build: .
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]
+    # Run manually for failover only; do not run with `beat` simultaneously.
+    profiles: ["standby"]
     restart: unless-stopped
 
   grafana:
