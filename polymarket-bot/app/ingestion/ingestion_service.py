@@ -19,6 +19,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -127,6 +128,9 @@ def _parse_clob_market(raw: dict[str, Any]) -> dict[str, Any]:
             token_yes = tok.get("token_id") or tok.get("tokenId") or tok.get("asset_id")
         elif outcome == "NO":
             token_no = tok.get("token_id") or tok.get("tokenId") or tok.get("asset_id")
+    # Some payloads expose direct token_id_* fields even when `tokens` is sparse.
+    token_yes = token_yes or raw.get("token_id_yes") or raw.get("tokenIdYes")
+    token_no = token_no or raw.get("token_id_no") or raw.get("tokenIdNo")
 
     end_date_iso = raw.get("end_date_iso") or raw.get("endDate") or raw.get("end_date")
     end_date: datetime | None = None
@@ -136,6 +140,14 @@ def _parse_clob_market(raw: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             end_date = None
 
+    resolved = _parse_bool(raw.get("archived"), default=False) or _parse_bool(
+        raw.get("resolved"), default=False
+    )
+    now_utc = datetime.now(tz=timezone.utc)
+    # Prefer deterministic open/closed state from end_date + resolved flag.
+    inferred_closed = resolved or (end_date is not None and end_date <= now_utc)
+    inferred_active = not inferred_closed
+
     return {
         "condition_id": str(raw.get("condition_id") or raw.get("conditionId") or "").lower(),
         "question": str(raw.get("question") or raw.get("description") or "")[:4096],
@@ -144,10 +156,9 @@ def _parse_clob_market(raw: dict[str, Any]) -> dict[str, Any]:
         "token_id_yes": token_yes,
         "token_id_no": token_no,
         "end_date": end_date,
-        "active": _parse_bool(raw.get("active"), default=True),
-        "closed": _parse_bool(raw.get("closed"), default=False),
-        "resolved": _parse_bool(raw.get("archived"), default=False)
-        or _parse_bool(raw.get("resolved"), default=False),
+        "active": inferred_active,
+        "closed": inferred_closed,
+        "resolved": resolved,
     }
 
 
@@ -178,6 +189,13 @@ async def upsert_markets(session: AsyncSession, markets: list[dict[str, Any]]) -
             for c in Market.__table__.columns
             if c.name not in {"condition_id"}
         }
+        # Never erase known token IDs when source payload omits them.
+        update_cols["token_id_yes"] = sa_func.coalesce(
+            stmt.excluded.token_id_yes, Market.token_id_yes
+        )
+        update_cols["token_id_no"] = sa_func.coalesce(
+            stmt.excluded.token_id_no, Market.token_id_no
+        )
         stmt = stmt.on_conflict_do_update(index_elements=["condition_id"], set_=update_cols)
         result = await session.execute(stmt)
         total += result.rowcount or 0
