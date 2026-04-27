@@ -225,6 +225,8 @@ class IngestionService:
         self._settings = get_settings()
         self._stop = asyncio.Event()
         self._ws: CLOBWebSocket | None = None
+        # Cursor for global `/data/trades` pagination to avoid re-reading stale page 1.
+        self._global_trades_cursor: str = ""
 
     def stop(self) -> None:
         self._stop.set()
@@ -295,19 +297,38 @@ class IngestionService:
             # Fallback: when market-scoped pulls return stale/empty windows, ingest
             # latest global trades to keep `trades` table fresh for observability.
             if total_trades == 0:
-                try:
-                    global_trades = await clob.fetch_trades(limit=500)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Ingestion global fallback: fetch_trades failed: {}", e)
-                    return
-                normalized_global = [normalize_trade(t) for t in global_trades]
-                normalized_global = [t for t in normalized_global if t is not None]
-                inserted_global = await persist_trades(session, normalized_global) if normalized_global else 0
+                cursor = self._global_trades_cursor
+                total_raw_global = 0
+                total_normalized_global = 0
+                total_inserted_global = 0
+                max_pages = 3
+                for _ in range(max_pages):
+                    try:
+                        page, next_cursor = await clob.fetch_trades_page(
+                            limit=500,
+                            next_cursor=cursor or None,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("Ingestion global fallback: fetch_trades failed: {}", e)
+                        break
+                    if not page:
+                        break
+                    total_raw_global += len(page)
+                    normalized_global = [normalize_trade(t) for t in page]
+                    normalized_global = [t for t in normalized_global if t is not None]
+                    total_normalized_global += len(normalized_global)
+                    if normalized_global:
+                        total_inserted_global += await persist_trades(session, normalized_global)
+                    if not next_cursor or next_cursor == cursor:
+                        break
+                    cursor = next_cursor
+                self._global_trades_cursor = cursor
                 logger.info(
-                    "Ingestion REST global fallback: raw={} normalized={} inserted={}",
-                    len(global_trades),
-                    len(normalized_global),
-                    inserted_global,
+                    "Ingestion REST global fallback: raw={} normalized={} inserted={} cursor={}",
+                    total_raw_global,
+                    total_normalized_global,
+                    total_inserted_global,
+                    self._global_trades_cursor or "<empty>",
                 )
 
     async def _run_ws_loop(self) -> None:

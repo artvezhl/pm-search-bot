@@ -203,7 +203,23 @@ class CLOBClient:
         market_id: str | None = None,
         maker_address: str | None = None,
         limit: int = 100,
+        next_cursor: str | None = None,
     ) -> list[dict[str, Any]]:
+        trades, _ = await self.fetch_trades_page(
+            market_id=market_id,
+            maker_address=maker_address,
+            limit=limit,
+            next_cursor=next_cursor,
+        )
+        return trades
+
+    async def fetch_trades_page(
+        self,
+        market_id: str | None = None,
+        maker_address: str | None = None,
+        limit: int = 100,
+        next_cursor: str | None = None,
+    ) -> tuple[list[dict[str, Any]], str]:
         """Fetch recent trades with graceful fallback.
 
         Primary: `/data/trades` (may require auth in some environments).
@@ -214,14 +230,18 @@ class CLOBClient:
             params["market"] = market_id
         if maker_address:
             params["maker_address"] = maker_address
+        if next_cursor:
+            params["next_cursor"] = next_cursor
 
         # Try /data/trades unless we already confirmed it's unauthorized.
         if self._trades_endpoint_available:
             try:
                 data = await self._get("/data/trades", params=params)
                 if isinstance(data, dict):
-                    return data.get("data") or data.get("trades") or []
-                return data or []
+                    trades = data.get("data") or data.get("trades") or []
+                    cursor = str(data.get("next_cursor") or data.get("nextCursor") or "")
+                    return trades, cursor
+                return data or [], ""
             except httpx.HTTPStatusError as e:
                 if e.response is not None and e.response.status_code == 401:
                     self._trades_endpoint_available = False
@@ -236,10 +256,12 @@ class CLOBClient:
             data = await self._get("/trades", params=params)
         except httpx.HTTPStatusError as e:
             logger.warning("CLOB /trades fallback failed: {}", e)
-            return []
+            return [], ""
         if isinstance(data, dict):
-            return data.get("data") or data.get("trades") or []
-        return data or []
+            trades = data.get("data") or data.get("trades") or []
+            cursor = str(data.get("next_cursor") or data.get("nextCursor") or "")
+            return trades, cursor
+        return data or [], ""
 
 
 def parse_trade_timestamp(value: Any) -> datetime:
