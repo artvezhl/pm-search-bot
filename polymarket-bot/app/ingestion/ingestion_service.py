@@ -268,21 +268,47 @@ class IngestionService:
                 logger.info("Ingestion: upserted {} markets", len(parsed))
 
             total_trades = 0
+            total_raw_trades = 0
+            total_normalized_trades = 0
             for market in parsed[:100]:  # cap per cycle to avoid rate-limit storms
                 try:
                     trades = await clob.fetch_trades(market_id=market["condition_id"], limit=50)
                 except Exception as e:  # noqa: BLE001
                     logger.debug("Ingestion: fetch_trades({}) failed: {}", market["condition_id"], e)
                     continue
+                total_raw_trades += len(trades)
                 normalized_rows: list[dict[str, Any]] = []
                 for t in trades:
                     nt = normalize_trade(t)
                     if nt is not None:
                         normalized_rows.append(nt)
+                total_normalized_trades += len(normalized_rows)
                 if normalized_rows:
                     total_trades += await persist_trades(session, normalized_rows)
-            if total_trades:
-                logger.info("Ingestion: upserted {} trades", total_trades)
+            logger.info(
+                "Ingestion REST market-scoped: raw={} normalized={} inserted={}",
+                total_raw_trades,
+                total_normalized_trades,
+                total_trades,
+            )
+
+            # Fallback: when market-scoped pulls return stale/empty windows, ingest
+            # latest global trades to keep `trades` table fresh for observability.
+            if total_trades == 0:
+                try:
+                    global_trades = await clob.fetch_trades(limit=500)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Ingestion global fallback: fetch_trades failed: {}", e)
+                    return
+                normalized_global = [normalize_trade(t) for t in global_trades]
+                normalized_global = [t for t in normalized_global if t is not None]
+                inserted_global = await persist_trades(session, normalized_global) if normalized_global else 0
+                logger.info(
+                    "Ingestion REST global fallback: raw={} normalized={} inserted={}",
+                    len(global_trades),
+                    len(normalized_global),
+                    inserted_global,
+                )
 
     async def _run_ws_loop(self) -> None:
         """Live stream of trades. Market/trade REST backfill is Celery's job."""
