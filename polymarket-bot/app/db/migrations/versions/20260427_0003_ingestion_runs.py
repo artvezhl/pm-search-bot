@@ -19,20 +19,28 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "ingestion_runs",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
-        sa.Column("task_name", sa.String(length=128), nullable=False),
-        sa.Column("status", sa.String(length=16), nullable=False),
-        sa.Column("date_from", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("date_to", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("inserted_rows", sa.Integer(), server_default="0", nullable=False),
-        sa.Column("error_message", sa.Text(), nullable=True),
-        sa.Column("started_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.create_index("idx_ingestion_runs_status", "ingestion_runs", ["status"])
-    op.create_index("idx_ingestion_runs_task_started", "ingestion_runs", ["task_name", "started_at"])
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if "ingestion_runs" not in inspector.get_table_names():
+        op.create_table(
+            "ingestion_runs",
+            sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+            sa.Column("task_name", sa.String(length=128), nullable=False),
+            sa.Column("status", sa.String(length=16), nullable=False),
+            sa.Column("date_from", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("date_to", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("inserted_rows", sa.Integer(), server_default="0", nullable=False),
+            sa.Column("error_message", sa.Text(), nullable=True),
+            sa.Column("started_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        )
+
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes("ingestion_runs")}
+    if "idx_ingestion_runs_status" not in existing_indexes:
+        op.create_index("idx_ingestion_runs_status", "ingestion_runs", ["status"])
+    if "idx_ingestion_runs_task_started" not in existing_indexes:
+        op.create_index("idx_ingestion_runs_task_started", "ingestion_runs", ["task_name", "started_at"])
 
 
 def downgrade() -> None:
