@@ -65,8 +65,8 @@ class Orderbook:
 class CLOBClient:
     def __init__(self, host: str | None = None, timeout: float = 15.0) -> None:
         self._host = (host or get_settings().clob_host).rstrip("/")
+        self._data_api_host = get_settings().data_api_host.rstrip("/")
         self._client = httpx.AsyncClient(timeout=timeout)
-        self._trades_endpoint_available = True
         self._settings = get_settings()
         self._l2_auth_enabled = all(
             [
@@ -220,48 +220,41 @@ class CLOBClient:
         limit: int = 100,
         next_cursor: str | None = None,
     ) -> tuple[list[dict[str, Any]], str]:
-        """Fetch recent trades with graceful fallback.
-
-        Primary: `/data/trades` (may require auth in some environments).
-        Fallback: `/trades` (public, payload shape may vary).
-        """
-        params: dict[str, Any] = {"limit": str(limit)}
+        """Fetch recent trades from public Data API `/trades` with offset pagination."""
+        offset = 0
+        if next_cursor:
+            try:
+                offset = max(0, int(next_cursor))
+            except ValueError:
+                offset = 0
+        params: dict[str, Any] = {"limit": str(limit), "offset": str(offset)}
         if market_id:
             params["market"] = market_id
         if maker_address:
-            params["maker_address"] = maker_address
-        if next_cursor:
-            params["next_cursor"] = next_cursor
+            params["user"] = maker_address
 
-        # Try /data/trades unless we already confirmed it's unauthorized.
-        if self._trades_endpoint_available:
-            try:
-                data = await self._get("/data/trades", params=params)
-                if isinstance(data, dict):
-                    trades = data.get("data") or data.get("trades") or []
-                    cursor = str(data.get("next_cursor") or data.get("nextCursor") or "")
-                    return trades, cursor
-                return data or [], ""
-            except httpx.HTTPStatusError as e:
-                if e.response is not None and e.response.status_code == 401:
-                    self._trades_endpoint_available = False
-                    logger.warning(
-                        "CLOB /data/trades returned 401, switching to /trades fallback"
-                    )
-                else:
-                    logger.warning("CLOB /data/trades failed: {}", e)
-
-        # Fallback to /trades (public route in many deployments).
+        url = f"{self._data_api_host}/trades"
         try:
-            data = await self._get("/trades", params=params)
+            resp = await self._client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
         except httpx.HTTPStatusError as e:
-            logger.warning("CLOB /trades fallback failed: {}", e)
+            logger.warning("Data API /trades failed: {}", e)
             return [], ""
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Data API /trades request failed: {}", e)
+            return [], ""
+
+        trades: list[dict[str, Any]]
         if isinstance(data, dict):
             trades = data.get("data") or data.get("trades") or []
-            cursor = str(data.get("next_cursor") or data.get("nextCursor") or "")
-            return trades, cursor
-        return data or [], ""
+        elif isinstance(data, list):
+            trades = data
+        else:
+            trades = []
+        next_offset = offset + len(trades)
+        cursor = str(next_offset) if trades else ""
+        return trades, cursor
 
 
 def parse_trade_timestamp(value: Any) -> datetime:

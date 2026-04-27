@@ -85,6 +85,7 @@ def normalize_trade(raw: dict[str, Any]) -> dict[str, Any] | None:
         or raw.get("maker")
         or raw.get("user")
         or raw.get("owner")
+        or raw.get("proxyWallet")
     )
     if not trade_id or not market_id or not maker:
         return None
@@ -106,14 +107,19 @@ def normalize_trade(raw: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "trade_id": str(trade_id),
         "market_id": str(market_id).lower(),
-        "asset_id": (raw.get("asset_id") or raw.get("token_id") or raw.get("tokenId")),
+        "asset_id": (
+            raw.get("asset_id")
+            or raw.get("token_id")
+            or raw.get("tokenId")
+            or raw.get("asset")
+        ),
         "maker_address": str(maker).lower(),
         "taker_address": (str(raw.get("taker") or raw.get("taker_address") or "") or None),
         "outcome": outcome,
         "price": Decimal(str(price)),
         "size": Decimal(str(size)),
         "side": side,
-        "tx_hash": raw.get("tx_hash") or raw.get("transaction_hash"),
+        "tx_hash": raw.get("tx_hash") or raw.get("transaction_hash") or raw.get("transactionHash"),
         "timestamp": ts,
     }
 
