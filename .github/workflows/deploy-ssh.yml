@@ -47,21 +47,27 @@ jobs:
     needs: build
     steps:
       - name: Preflight check on remote server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script_stop: true
-          command_timeout: 2m
-          script: |
-            set -euo pipefail
-            cd "${{ secrets.DEPLOY_PATH }}"
-            if [ ! -f "docker-compose.server.yml" ]; then
-              echo "docker-compose.server.yml not found in DEPLOY_PATH"
-              exit 1
-            fi
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p 22 "${SSH_HOST}" >> ~/.ssh/known_hosts
+
+          ssh -p 22 \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=10 \
+            -o ServerAliveCountMax=2 \
+            "${SSH_USER}@${SSH_HOST}" \
+            "set -euo pipefail; cd \"${DEPLOY_PATH}\"; test -f docker-compose.server.yml"
 
       - name: Login to GHCR on remote server
         uses: appleboy/ssh-action@v1.0.3
