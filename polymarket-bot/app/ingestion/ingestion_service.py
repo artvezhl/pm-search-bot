@@ -39,6 +39,21 @@ def _parse_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _parse_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    s = str(value).strip().lower()
+    if s in {"true", "1", "yes", "y", "on"}:
+        return True
+    if s in {"false", "0", "no", "n", "off", ""}:
+        return False
+    return default
+
+
 def _normalize_outcome(raw: Any) -> str:
     s = str(raw or "").strip().upper()
     if s in {"YES", "1", "TRUE"}:
@@ -129,9 +144,10 @@ def _parse_clob_market(raw: dict[str, Any]) -> dict[str, Any]:
         "token_id_yes": token_yes,
         "token_id_no": token_no,
         "end_date": end_date,
-        "active": bool(raw.get("active", True)),
-        "closed": bool(raw.get("closed", False)),
-        "resolved": bool(raw.get("archived", False)) or bool(raw.get("resolved", False)),
+        "active": _parse_bool(raw.get("active"), default=True),
+        "closed": _parse_bool(raw.get("closed"), default=False),
+        "resolved": _parse_bool(raw.get("archived"), default=False)
+        or _parse_bool(raw.get("resolved"), default=False),
     }
 
 
