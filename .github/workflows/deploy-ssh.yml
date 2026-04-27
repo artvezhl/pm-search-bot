@@ -43,164 +43,58 @@ jobs:
             ghcr.io/${{ github.repository }}/polymarket-bot:latest
 
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     needs: build
     steps:
-      - name: Preflight check on remote server
-        shell: bash
+      - name: Deploy on self-hosted runner
         env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          APP_IMAGE: ${{ needs.build.outputs.image }}
         run: |
           set -euo pipefail
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -T 10 -p 22 "${SSH_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          cd "${DEPLOY_PATH}"
+          if [ ! -f "docker-compose.server.yml" ]; then
+            echo "docker-compose.server.yml not found in DEPLOY_PATH: ${DEPLOY_PATH}"
+            ls -la
+            exit 1
+          fi
 
-          echo "Checking SSH connectivity to ${SSH_USER}@${SSH_HOST}:22 ..."
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+
           for attempt in 1 2 3; do
-            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] SSH preflight attempt ${attempt}/3"
-            if timeout 45s ssh -4 -p 22 \
-              -o BatchMode=yes \
-              -o ConnectTimeout=20 \
-              -o ConnectionAttempts=1 \
-              -o ServerAliveInterval=10 \
-              -o ServerAliveCountMax=2 \
-              -o StrictHostKeyChecking=accept-new \
-              "${SSH_USER}@${SSH_HOST}" \
-              "set -euo pipefail; \
-               echo \"SSH connection established\"; \
-               if [ ! -d \"${DEPLOY_PATH}\" ]; then \
-                 echo \"DEPLOY_PATH does not exist: ${DEPLOY_PATH}\"; \
-                 exit 1; \
-               fi; \
-               cd \"${DEPLOY_PATH}\"; \
-               if [ ! -f docker-compose.server.yml ]; then \
-                 echo \"docker-compose.server.yml not found in DEPLOY_PATH: ${DEPLOY_PATH}\"; \
-                 ls -la; \
-                 exit 1; \
-               fi; \
-               echo \"Preflight checks passed\""; then
-              exit 0
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Pull attempt ${attempt}/3: ${APP_IMAGE}"
+            if docker pull "${APP_IMAGE}"; then
+              echo "Image pull succeeded"
+              break
             fi
             if [ "${attempt}" -lt 3 ]; then
-              echo "SSH preflight failed, retrying in 15s..."
-              sleep 15
+              echo "Image pull failed, retrying in 10s..."
+              sleep 10
+            else
+              echo "Image pull failed after 3 attempts"
+              exit 1
             fi
           done
-          echo "SSH preflight failed after 3 attempts"
+
+          echo "Inspecting pulled image: ${APP_IMAGE}"
+          docker image ls --digests | grep -E "REPOSITORY|polymarket-bot|${APP_IMAGE##*:}" || true
+          echo "Docker disk usage:"
+          docker system df
+
+          APP_IMAGE="${APP_IMAGE}" docker compose -f docker-compose.server.yml up -d --remove-orphans
+          APP_IMAGE="${APP_IMAGE}" docker compose -f docker-compose.server.yml exec -T app alembic upgrade head
+
+          echo "Checking app health endpoint..."
+          for i in $(seq 1 20); do
+            if curl -fsS "http://127.0.0.1:${API_PORT:-8000}/health" >/dev/null; then
+              echo "Healthcheck passed"
+              exit 0
+            fi
+            echo "Waiting for app health ($i/20)..."
+            sleep 3
+          done
+          echo "Healthcheck failed after retries. Recent app logs:"
+          docker compose -f docker-compose.server.yml logs --tail=200 app
           exit 1
-
-      - name: Login to GHCR on remote server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script_stop: true
-          command_timeout: 2m
-          script: |
-            set -euo pipefail
-            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
-
-      - name: Pull app images
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script_stop: true
-          command_timeout: 20m
-          script: |
-            set -euo pipefail
-            cd "${{ secrets.DEPLOY_PATH }}"
-            APP_IMAGE="${{ needs.build.outputs.image }}"
-            for attempt in 1 2 3; do
-              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Pull attempt ${attempt}/3: ${APP_IMAGE}"
-              if docker pull "${APP_IMAGE}"; then
-                echo "Image pull succeeded"
-                exit 0
-              fi
-              if [ "${attempt}" -lt 3 ]; then
-                echo "Image pull failed, retrying in 10s..."
-                sleep 10
-              fi
-            done
-            echo "Image pull failed after 3 attempts"
-            exit 1
-
-      - name: Diagnose image and docker disk usage
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script_stop: true
-          command_timeout: 2m
-          script: |
-            set -euo pipefail
-            APP_IMAGE="${{ needs.build.outputs.image }}"
-            echo "Inspecting pulled image: ${APP_IMAGE}"
-            docker image ls --digests | rg "polymarket-bot|REPOSITORY|${APP_IMAGE##*:}" || true
-            echo "Docker disk usage:"
-            docker system df
-
-      - name: Restart services with new image
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script_stop: true
-          command_timeout: 5m
-          script: |
-            set -euo pipefail
-            cd "${{ secrets.DEPLOY_PATH }}"
-            APP_IMAGE="${{ needs.build.outputs.image }}" docker compose -f docker-compose.server.yml up -d --remove-orphans
-
-      - name: Run migrations
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script_stop: true
-          command_timeout: 3m
-          script: |
-            set -euo pipefail
-            cd "${{ secrets.DEPLOY_PATH }}"
-            APP_IMAGE="${{ needs.build.outputs.image }}" docker compose -f docker-compose.server.yml exec -T app alembic upgrade head
-
-      - name: Healthcheck
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script_stop: true
-          command_timeout: 2m
-          script: |
-            set -euo pipefail
-            cd "${{ secrets.DEPLOY_PATH }}"
-            echo "Checking app health endpoint..."
-            for i in $(seq 1 20); do
-              if curl -fsS "http://127.0.0.1:${API_PORT:-8000}/health" >/dev/null; then
-                echo "Healthcheck passed"
-                exit 0
-              fi
-              echo "Waiting for app health ($i/20)..."
-              sleep 3
-            done
-            echo "Healthcheck failed after retries. Recent app logs:"
-            docker compose -f docker-compose.server.yml logs --tail=200 app
-            exit 1
