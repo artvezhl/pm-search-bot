@@ -73,7 +73,6 @@ def _normalize_side(raw: Any) -> str:
 
 def normalize_trade(raw: dict[str, Any]) -> dict[str, Any] | None:
     """Map a CLOB REST/WS trade payload to our `trades` row shape."""
-    trade_id = raw.get("id") or raw.get("trade_id") or raw.get("hash")
     market_id = (
         raw.get("market")
         or raw.get("market_id")
@@ -87,8 +86,6 @@ def normalize_trade(raw: dict[str, Any]) -> dict[str, Any] | None:
         or raw.get("owner")
         or raw.get("proxyWallet")
     )
-    if not trade_id or not market_id or not maker:
-        return None
 
     price = _parse_float(raw.get("price"))
     size = _parse_float(raw.get("size") or raw.get("shares") or raw.get("notional"))
@@ -103,6 +100,15 @@ def normalize_trade(raw: dict[str, Any]) -> dict[str, Any] | None:
         or raw.get("created_at")
         or raw.get("ts")
     )
+    tx_hash = raw.get("tx_hash") or raw.get("transaction_hash") or raw.get("transactionHash")
+
+    trade_id = raw.get("id") or raw.get("trade_id") or raw.get("hash")
+    if not trade_id and tx_hash:
+        # Data API `/trades` may not include explicit `id`; derive deterministic id.
+        trade_id = f"{tx_hash}:{raw.get('asset') or raw.get('asset_id') or ''}:{side}:{ts.timestamp()}"
+
+    if not trade_id or not market_id or not maker:
+        return None
 
     return {
         "trade_id": str(trade_id),
@@ -119,7 +125,7 @@ def normalize_trade(raw: dict[str, Any]) -> dict[str, Any] | None:
         "price": Decimal(str(price)),
         "size": Decimal(str(size)),
         "side": side,
-        "tx_hash": raw.get("tx_hash") or raw.get("transaction_hash") or raw.get("transactionHash"),
+        "tx_hash": tx_hash,
         "timestamp": ts,
     }
 
