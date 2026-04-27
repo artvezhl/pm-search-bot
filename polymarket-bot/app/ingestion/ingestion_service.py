@@ -14,6 +14,7 @@ Player Tracker can discover new wallets with large positions automatically.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -104,8 +105,12 @@ def normalize_trade(raw: dict[str, Any]) -> dict[str, Any] | None:
 
     trade_id = raw.get("id") or raw.get("trade_id") or raw.get("hash")
     if not trade_id and tx_hash:
-        # Data API `/trades` may not include explicit `id`; derive deterministic id.
-        trade_id = f"{tx_hash}:{raw.get('asset') or raw.get('asset_id') or ''}:{side}:{ts.timestamp()}"
+        # Data API `/trades` may not include explicit `id`; derive compact deterministic id.
+        digest_src = (
+            f"{tx_hash}|{raw.get('asset') or raw.get('asset_id') or ''}|"
+            f"{side}|{raw.get('price') or ''}|{raw.get('size') or ''}|{ts.timestamp()}"
+        )
+        trade_id = f"dapi_{hashlib.sha1(digest_src.encode('utf-8')).hexdigest()}"
 
     if not trade_id or not market_id or not maker:
         return None
