@@ -84,11 +84,41 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script_stop: true
-          command_timeout: 8m
+          command_timeout: 20m
           script: |
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
-            APP_IMAGE="${{ needs.build.outputs.image }}" docker compose -f docker-compose.server.yml pull app worker beat
+            APP_IMAGE="${{ needs.build.outputs.image }}"
+            for attempt in 1 2 3; do
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Pull attempt ${attempt}/3: ${APP_IMAGE}"
+              if docker pull "${APP_IMAGE}"; then
+                echo "Image pull succeeded"
+                exit 0
+              fi
+              if [ "${attempt}" -lt 3 ]; then
+                echo "Image pull failed, retrying in 10s..."
+                sleep 10
+              fi
+            done
+            echo "Image pull failed after 3 attempts"
+            exit 1
+
+      - name: Diagnose image and docker disk usage
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script_stop: true
+          command_timeout: 2m
+          script: |
+            set -euo pipefail
+            APP_IMAGE="${{ needs.build.outputs.image }}"
+            echo "Inspecting pulled image: ${APP_IMAGE}"
+            docker image ls --digests | rg "polymarket-bot|REPOSITORY|${APP_IMAGE##*:}" || true
+            echo "Docker disk usage:"
+            docker system df
 
       - name: Restart services with new image
         uses: appleboy/ssh-action@v1.0.3
